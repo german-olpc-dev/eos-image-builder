@@ -116,6 +116,7 @@ class ImageConfigParser(configparser.ConfigParser):
         ('buildroot', 'packages'),
         ('check', 'hooks'),
         ('content', 'hooks'),
+        ('endlesskey', 'collections'),
         ('error', 'hooks'),
         ('flatpak', 'locales'),
         ('flatpak-remote-*', 'apps'),
@@ -126,6 +127,9 @@ class ImageConfigParser(configparser.ConfigParser):
         ('image', 'icon_grid'),
         ('image', 'settings'),
         ('image', 'settings_locks'),
+        ('kolibri', 'install_channels'),
+        ('kolibri-*', 'exclude_node_ids'),
+        ('kolibri-*', 'include_node_ids'),
         ('manifest', 'hooks'),
         ('publish', 'hooks'),
     ]
@@ -242,25 +246,23 @@ class ImageConfigParser(configparser.ConfigParser):
                                  opt)
                     yield (section, opt)
             else:
-                add_vals = Counter()
+                values = Counter()
                 for opt in add_opts:
                     logger.debug('Adding %s %s values from %s', section,
                                  option, opt)
-                    add_vals.update(sect[opt].split())
+                    values.update(sect[opt].split())
                     yield (section, opt)
 
-                del_vals = Counter()
                 for opt in del_opts:
                     logger.debug('Removing %s %s values from %s', section,
                                  option, opt)
-                    del_vals.update(sect[opt].split())
+                    values.subtract(sect[opt].split())
                     yield (section, opt)
 
-                # Set the option to the difference of the counters.
+                # Set the option to the keys that have positive values.
                 # Merge the values together with newlines like they were
                 # in the original configuration.
-                vals = add_vals - del_vals
-                sect[option] = '\n'.join(sorted(vals.keys()))
+                sect[option] = '\n'.join(k for k, v in values.items() if v > 0)
 
     def copy(self):
         """Create a new instance from this one"""

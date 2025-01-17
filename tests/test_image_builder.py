@@ -281,6 +281,54 @@ def test_config_paths(make_builder, tmp_path, tmp_builder_paths, caplog):
     _run_test()
 
 
+def test_config_inheritance(make_builder, tmp_path, tmp_builder_paths, caplog):
+    """Test that personality en_GB_orkney also loads settings from en and en_GB."""
+    configdir = tmp_path / 'config'
+    personalitydir = configdir / 'personality'
+    personalitydir.mkdir(parents=True, exist_ok=True)
+
+    en = personalitydir / 'en.ini'
+    en.write_text(dedent("""\
+    [image]
+    language = en_US.utf8
+
+    [flatpak-remote-eos-apps]
+    apps_add =
+      com.endlessm.encyclopedia.en
+      com.endlessm.football.en
+    """))
+
+    en_GB = personalitydir / 'en_GB.ini'
+    en_GB.write_text(dedent("""\
+    [image]
+    language = en_GB.utf8
+
+    [flatpak-remote-eos-apps]
+    # Football means something else in the UK
+    apps_del =
+      com.endlessm.football.en
+    apps_add =
+      com.endlessm.football.en_GB
+    """))
+
+    en_GB_orkney = personalitydir / 'en_GB_orkney.ini'
+    en_GB_orkney.write_text(dedent("""\
+    [flatpak-remote-eos-apps]
+    apps_add =
+      com.endlessm.orkneyingasaga
+    """))
+
+    builder = make_builder(configdir=str(configdir), personality="en_GB_orkney")
+    builder.configure()
+
+    assert builder.config['image']['language'] == "en_GB.utf8"
+    assert builder.config['flatpak-remote-eos-apps']['apps'] == "\n".join([
+      "com.endlessm.encyclopedia.en",
+      "com.endlessm.football.en_GB",
+      "com.endlessm.orkneyingasaga",
+    ])
+
+
 def test_localdir(make_builder, tmp_path, tmp_builder_paths, caplog):
     """Test use of local settings directory"""
     # Build without localdir
@@ -327,3 +375,52 @@ def test_localdir(make_builder, tmp_path, tmp_builder_paths, caplog):
     assert (builder.config['image']['branding_desktop_logo'] ==
             str(localdir / 'data' / 'desktop.png'))
     assert builder.config['image']['signing_key'] == 'foobar'
+
+
+def test_path_validation(make_builder, tmp_path):
+    configdir = tmp_path / 'config'
+    configdir.mkdir()
+
+    # Schema
+    schema = configdir / 'schema.ini'
+    schema.write_text(dedent("""\
+    [image]
+    singular_type = path
+    plural_type = paths
+    """))
+
+    # Some config
+    defaults = configdir / 'defaults.ini'
+    defaults.write_text(dedent("""\
+    [image]
+    singular = ${build:localdatadir}/a.txt
+    plural = ${build:localdatadir}/b.txt ${build:localdatadir}/c.txt
+    """))
+
+    localdir = tmp_path / 'local'
+    localdatadir = localdir / 'data'
+    localdatadir.mkdir(parents=True)
+
+    a = localdatadir / 'a.txt'
+    a.touch()
+
+    b = localdatadir / 'b.txt'
+    b.touch()
+
+    c = localdatadir / 'c.txt'
+    c.touch()
+
+    builder = make_builder(configdir=str(configdir), localdir=str(localdir))
+    builder.configure()
+
+    # All paths exist
+    builder.check_config()
+
+    b.unlink()
+    with pytest.raises(eib.ImageBuildError, match=r'plural.*b.txt'):
+        builder.check_config()
+
+    b.touch()
+    a.unlink()
+    with pytest.raises(eib.ImageBuildError, match=r'singular.*a.txt'):
+        builder.check_config()
